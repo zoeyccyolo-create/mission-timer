@@ -1,0 +1,657 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>任務計時器 · 25:00</title>
+<style>
+  :root{
+    --accent:#1e9df1;
+    --accent-hi:#38adff;
+    --ink:#f2f7ff;
+    --muted:#8494a8;
+    --chip-line:rgba(180,205,235,.26);
+    --btn-face:#232b3a;
+    --btn-line:rgba(255,255,255,.09);
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Roboto Mono", monospace;
+  }
+
+  *{box-sizing:border-box;}
+  html,body{height:100%;}
+  body{
+    margin:0;
+    background:#02040b;
+    color:var(--ink);
+    font-family:var(--mono);
+    -webkit-font-smoothing:antialiased;
+    overflow:hidden;
+  }
+
+  #sky{ position:fixed; inset:0; width:100%; height:100%; display:block; z-index:0; }
+
+  .sr-only{
+    position:absolute; width:1px; height:1px; padding:0; margin:-1px;
+    overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; border:0;
+  }
+
+  /* ── 星球切換列 ── */
+  .planets{
+    position:fixed;
+    top:0; left:0; right:0;
+    z-index:2;
+    display:flex;
+    justify-content:flex-end;
+    gap:8px;
+    padding:20px 26px;
+    flex-wrap:wrap;
+  }
+  .chip{
+    font-family:inherit;
+    font-size:13px;
+    letter-spacing:.12em;
+    padding:9px 20px 9px 22px;
+    border-radius:999px;
+    border:1px solid var(--chip-line);
+    background:rgba(10,18,32,.35);
+    color:#b9c6d8;
+    cursor:pointer;
+    -webkit-backdrop-filter:blur(6px);
+    backdrop-filter:blur(6px);
+    transition:background .18s ease, color .18s ease, border-color .18s ease;
+    -webkit-tap-highlight-color:transparent;
+  }
+  .chip:hover{ border-color:rgba(200,225,255,.5); color:#e2ecf8; }
+  .chip[aria-selected="true"]{
+    background:#eef4fb;
+    border-color:#eef4fb;
+    color:#101821;
+    font-weight:600;
+  }
+  .chip:focus-visible{ outline:2px solid var(--accent-hi); outline-offset:3px; }
+
+  /* ── 主區 ── */
+  main{
+    position:relative;
+    z-index:1;
+    min-height:100dvh;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    padding:12vh 24px 40vh;
+  }
+
+  .clock{
+    font-size:clamp(3.4rem, 13.5vw, 9rem);
+    font-weight:600;
+    line-height:1;
+    letter-spacing:.07em;
+    padding-left:.07em;
+    font-variant-numeric:tabular-nums;
+    font-feature-settings:"tnum" 1;
+    text-align:center;
+    color:#fff;
+    text-shadow:0 0 60px rgba(120,190,255,.25);
+    transition:color .3s ease;
+  }
+  body.is-done .clock{ color:var(--accent-hi); text-shadow:0 0 60px rgba(56,173,255,.4); }
+
+  .progress{
+    width:min(600px, 84vw);
+    margin-top:clamp(30px,6vh,60px);
+  }
+  .track{
+    position:relative;
+    height:3px;
+    background:rgba(180,205,235,.16);
+    border-radius:3px;
+  }
+  .fill{
+    position:absolute; left:0; top:0; bottom:0;
+    width:0%;
+    background:var(--accent);
+    border-radius:3px;
+    box-shadow:0 0 14px rgba(30,157,241,.55);
+  }
+  .rocket{
+    position:absolute;
+    top:50%; left:0;
+    width:30px; height:30px;
+    transform:translate(-50%,-50%);
+  }
+  .rocket svg{ display:block; width:100%; height:100%; overflow:visible; }
+  .flame{ opacity:0; transform-origin:7px 12px; }
+  body.is-running .flame{ animation:burn .26s steps(2,end) infinite; }
+  @keyframes burn{
+    0%   { opacity:1;   transform:scaleX(1); }
+    100% { opacity:.45; transform:scaleX(.55); }
+  }
+
+  .ends{
+    display:flex;
+    justify-content:space-between;
+    margin-top:14px;
+    font-size:13px;
+    letter-spacing:.18em;
+    color:var(--muted);
+  }
+
+  .controls{
+    display:flex;
+    gap:14px;
+    margin-top:clamp(34px,6.5vh,66px);
+    flex-wrap:wrap;
+    justify-content:center;
+  }
+  .btn{
+    font-family:inherit;
+    font-size:17px;
+    font-weight:600;
+    letter-spacing:.16em;
+    padding:19px 40px 19px 46px;
+    border-radius:28px;
+    border:1px solid var(--btn-line);
+    cursor:pointer;
+    transition:transform .12s ease, background .18s ease, opacity .18s ease, color .18s ease;
+    -webkit-tap-highlight-color:transparent;
+  }
+  .btn:active{ transform:translateY(1px); }
+  .btn:focus-visible{ outline:2px solid var(--accent-hi); outline-offset:3px; }
+
+  .btn.primary{
+    background:var(--accent);
+    border-color:var(--accent);
+    color:#fff;
+    box-shadow:0 14px 40px -14px rgba(30,157,241,.9);
+  }
+  .btn.primary:hover{ background:var(--accent-hi); }
+
+  .btn.ghost{
+    background:rgba(35,43,58,.84);
+    color:#c3cedd;
+    -webkit-backdrop-filter:blur(8px);
+    backdrop-filter:blur(8px);
+  }
+  .btn.ghost:hover{ background:rgba(43,52,72,.92); color:#e3ebf6; }
+
+  .btn[disabled]{ opacity:.5; cursor:default; transform:none; box-shadow:none; }
+
+  @media (max-width: 640px){
+    .planets{ justify-content:center; padding:14px 12px; gap:6px; }
+    .chip{ font-size:12px; padding:7px 14px 7px 16px; }
+    .btn{ font-size:15px; padding:16px 26px 16px 31px; }
+    main{ padding:16vh 18px 36vh; }
+  }
+
+  @media (prefers-reduced-motion: reduce){
+    body.is-running .flame{ animation:none; opacity:.85; }
+    .btn,.chip{ transition:none; }
+  }
+</style>
+</head>
+<body>
+
+<canvas id="sky" aria-hidden="true"></canvas>
+
+<nav class="planets" id="planets" role="tablist" aria-label="目的地星球">
+  <button class="chip" type="button" role="tab" data-planet="earth"   aria-selected="true">地球</button>
+  <button class="chip" type="button" role="tab" data-planet="mars"    aria-selected="false">火星</button>
+  <button class="chip" type="button" role="tab" data-planet="moon"    aria-selected="false">月球</button>
+  <button class="chip" type="button" role="tab" data-planet="jupiter" aria-selected="false">木星</button>
+  <button class="chip" type="button" role="tab" data-planet="saturn"  aria-selected="false">土星</button>
+</nav>
+
+<main>
+  <div id="clock" class="clock" role="timer" aria-live="off">25:00</div>
+  <p id="status" class="sr-only" aria-live="polite">待機中</p>
+
+  <div class="progress">
+    <div class="track" id="track" role="progressbar" aria-label="任務進度"
+         aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+      <div class="fill" id="fill"></div>
+      <div class="rocket" id="rocket">
+        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path class="flame" d="M6.6 12 L1.2 9.3 L3.2 12 L1.2 14.7 Z" fill="#38adff"/>
+          <path d="M11 6.6 L8.2 2.6 L7.4 8.8 Z" fill="#1e9df1"/>
+          <path d="M11 17.4 L8.2 21.4 L7.4 15.2 Z" fill="#1e9df1"/>
+          <path d="M5.8 12 L11 6.7 L16 6.7 C19.6 6.7 22 9.1 22 12 C22 14.9 19.6 17.3 16 17.3 L11 17.3 Z"
+                fill="#eaf4ff"/>
+          <circle cx="16.6" cy="12" r="1.9" fill="#0b1220"/>
+        </svg>
+      </div>
+    </div>
+    <div class="ends"><span>啟程</span><span>抵達</span></div>
+  </div>
+
+  <div class="controls">
+    <button id="btnStart" class="btn primary" type="button">發射</button>
+    <button id="btnPause" class="btn ghost" type="button">待機</button>
+    <button id="btnReset" class="btn ghost" type="button">返航</button>
+  </div>
+</main>
+
+<script>
+(function(){
+  "use strict";
+
+  /* ───────── 星空：座標固定寫死，重繪不跳動 ─────────
+     每顆星四個值：x(0~1)、y(0~1)、半徑(px)、亮度 */
+  var STARS = [
+    0.031,0.118,0.9,0.55,  0.067,0.402,1.3,0.75,  0.094,0.221,0.7,0.42,  0.118,0.639,1.0,0.60,
+    0.142,0.077,1.5,0.85,  0.171,0.318,0.8,0.48,  0.196,0.503,1.1,0.66,  0.214,0.164,0.6,0.35,
+    0.238,0.712,1.2,0.70,  0.262,0.045,0.9,0.52,  0.287,0.377,1.4,0.80,  0.309,0.258,0.7,0.40,
+    0.331,0.586,1.0,0.58,  0.352,0.132,1.2,0.68,  0.376,0.451,0.8,0.46,  0.398,0.694,0.9,0.54,
+    0.417,0.203,1.6,0.90,  0.441,0.348,0.7,0.38,  0.463,0.098,1.0,0.62,  0.487,0.541,1.3,0.74,
+    0.508,0.286,0.8,0.44,  0.529,0.428,0.9,0.56,  0.551,0.156,1.1,0.64,  0.573,0.663,0.7,0.36,
+    0.594,0.061,1.4,0.82,  0.617,0.394,1.0,0.60,  0.638,0.239,0.8,0.47,  0.661,0.512,1.2,0.71,
+    0.682,0.109,0.9,0.53,  0.703,0.607,0.7,0.39,  0.724,0.331,1.5,0.86,  0.746,0.187,1.0,0.59,
+    0.768,0.469,0.8,0.45,  0.789,0.734,1.1,0.65,  0.807,0.086,0.9,0.51,  0.829,0.362,1.3,0.76,
+    0.851,0.212,0.7,0.37,  0.872,0.556,1.0,0.61,  0.893,0.128,1.2,0.69,  0.914,0.441,0.8,0.43,
+    0.936,0.294,0.9,0.57,  0.957,0.671,1.4,0.79,  0.973,0.171,0.7,0.41,  0.988,0.487,1.0,0.63,
+    0.012,0.556,0.8,0.46,  0.046,0.681,1.1,0.67,  0.081,0.041,0.7,0.36,  0.106,0.472,1.3,0.77,
+    0.131,0.267,0.9,0.50,  0.156,0.598,0.8,0.44,  0.181,0.729,1.0,0.58,  0.206,0.093,1.2,0.72,
+    0.229,0.436,0.7,0.38,  0.251,0.617,0.9,0.55,  0.274,0.184,1.1,0.66,  0.298,0.521,0.8,0.42,
+    0.321,0.071,1.0,0.60,  0.343,0.301,1.4,0.81,  0.366,0.652,0.7,0.35,  0.389,0.229,0.9,0.53,
+    0.409,0.577,1.2,0.70,  0.432,0.412,0.8,0.47,  0.454,0.744,1.0,0.62,  0.476,0.052,0.7,0.39,
+    0.498,0.317,1.3,0.75,  0.519,0.628,0.9,0.51,  0.541,0.243,0.8,0.45,  0.562,0.481,1.1,0.68,
+    0.584,0.142,0.7,0.37,  0.606,0.703,1.0,0.59,  0.628,0.373,0.9,0.54,  0.649,0.087,1.2,0.73,
+    0.671,0.446,0.8,0.43,  0.692,0.264,1.0,0.61,  0.713,0.581,0.7,0.36,  0.735,0.121,1.4,0.83,
+    0.757,0.397,0.9,0.52,  0.778,0.223,0.8,0.46,  0.799,0.638,1.1,0.64,  0.821,0.056,0.7,0.40,
+    0.842,0.459,1.0,0.57,  0.864,0.339,0.9,0.49,  0.885,0.712,1.3,0.78,  0.907,0.196,0.8,0.44,
+    0.928,0.529,0.7,0.38,  0.949,0.104,1.0,0.60,  0.968,0.386,0.9,0.55,  0.984,0.251,1.2,0.71,
+    0.022,0.334,0.7,0.34,  0.058,0.147,0.9,0.49,  0.073,0.512,0.6,0.31,  0.089,0.758,1.0,0.56,
+    0.112,0.363,0.8,0.41,  0.147,0.446,0.6,0.30,  0.164,0.688,0.9,0.48,  0.188,0.238,1.0,0.55,
+    0.219,0.541,0.7,0.33,  0.244,0.371,1.1,0.63,  0.266,0.766,0.8,0.42,  0.281,0.132,0.6,0.29,
+    0.302,0.462,0.9,0.50,  0.316,0.198,0.7,0.36,  0.338,0.741,1.0,0.54,  0.359,0.278,0.6,0.32,
+    0.381,0.526,0.8,0.43,  0.403,0.081,0.9,0.47,  0.424,0.301,0.7,0.35,  0.447,0.671,1.1,0.58,
+    0.469,0.212,0.6,0.28,  0.491,0.401,0.9,0.46,  0.512,0.117,0.8,0.40,  0.534,0.712,1.0,0.53,
+    0.556,0.331,0.6,0.30,  0.578,0.589,0.9,0.44,  0.599,0.171,0.7,0.34,  0.621,0.471,1.1,0.59,
+    0.643,0.284,0.6,0.31,  0.664,0.694,0.8,0.41,  0.686,0.418,0.9,0.48,  0.708,0.148,0.7,0.33,
+    0.729,0.508,1.0,0.52,  0.751,0.251,0.6,0.29,  0.773,0.612,0.8,0.40,  0.794,0.318,0.9,0.45,
+    0.816,0.176,0.7,0.32,  0.838,0.581,1.0,0.51,  0.859,0.108,0.6,0.30,  0.881,0.428,0.8,0.42,
+    0.902,0.266,0.9,0.47,  0.924,0.658,0.7,0.33,  0.946,0.211,1.0,0.50,  0.962,0.541,0.6,0.31,
+    0.978,0.328,0.8,0.39,  0.994,0.128,0.9,0.46
+  ];
+  var STAR_BAND = 0.95;
+
+  /* ───────── 星球設定：外觀 + 各自的任務時長 ───────── */
+  var PLANETS = {
+    earth:{
+      label:'地球', minutes:25,
+      ramp:[[6,14,34],[26,70,122],[94,178,218],[228,246,255]],
+      halo:'110,186,255', limb:'150,214,255',
+      body:['#01030a','#050c1c'], bands:0, spin:0.0000075
+    },
+    mars:{
+      label:'火星', minutes:30,
+      ramp:[[28,10,6],[96,40,20],[198,106,54],[255,216,180]],
+      halo:'255,146,88', limb:'255,190,144',
+      body:['#0a0402','#180a05'], bands:0.05, spin:0.0000068
+    },
+    moon:{
+      label:'月球', minutes:15,
+      ramp:[[11,12,15],[54,56,63],[138,142,152],[242,244,250]],
+      halo:'176,190,208', limb:'220,228,240',
+      body:['#040406','#0e1013'], bands:0, spin:0.0000042
+    },
+    jupiter:{
+      label:'木星', minutes:45,
+      ramp:[[26,16,8],[106,68,34],[208,158,96],[255,240,208]],
+      halo:'255,198,132', limb:'255,224,176',
+      body:['#090603','#1a1108'], bands:0.22, spin:0.0000135
+    },
+    saturn:{
+      label:'土星', minutes:50,
+      ramp:[[28,22,9],[112,90,38],[214,182,106],[255,247,216]],
+      halo:'255,220,152', limb:'255,238,190',
+      body:['#0a0803','#1b1509'], bands:0.16, spin:0.0000115
+    }
+  };
+  var current = 'earth';
+
+  /* ───────── 星球幾何 ───────── */
+  var cvs = document.getElementById('sky');
+  var ctx = cvs.getContext('2d');
+  var W = 0, H = 0, DPR = 1;
+  var cx = 0, cy = 0, R = 1;
+  var ARC = 0.42;              // 地平線露出畫面下方多少高度
+  var TILT = 76 * Math.PI/180; // 自轉軸傾角，讓可見帶落在中緯度
+  var ROLL = -0.10;            // 地平線微傾
+  var CA = Math.cos(TILT), SA = Math.sin(TILT);
+  var CR = Math.cos(ROLL), SR = Math.sin(ROLL);
+
+  // 光源在左上（螢幕座標 y 向上為正）
+  var LX = -0.52, LY = 0.62, LZ = 0.59;
+  (function(){ var n = Math.sqrt(LX*LX+LY*LY+LZ*LZ); LX/=n; LY/=n; LZ/=n; })();
+
+  // 經緯點陣（planet space，預先算好）：[cosLat, sinLat, latRad]
+  var LAT_STEP = 1.15, LON_STEP = 1.25;
+  var LAT = [], LON = [];
+  (function build(){
+    for (var la = -88; la <= 88; la += LAT_STEP){
+      var r = la * Math.PI/180;
+      LAT.push(Math.cos(r), Math.sin(r), r);
+    }
+    for (var lo = 0; lo < 360; lo += LON_STEP){
+      var t = lo * Math.PI/180;
+      LON.push(Math.cos(t), Math.sin(t));
+    }
+  })();
+
+  // 亮度分層：預先產生色階字串，避免每格重組字串
+  var LEVELS = 30;
+  var RAMP = [];
+  function buildRamp(stops){
+    RAMP.length = 0;
+    for (var i = 0; i < LEVELS; i++){
+      var t = i/(LEVELS-1) * (stops.length-1);
+      var k = Math.min(stops.length-2, Math.floor(t));
+      var f = t - k, a = stops[k], b = stops[k+1];
+      RAMP.push('rgb(' +
+        Math.round(a[0]+(b[0]-a[0])*f) + ',' +
+        Math.round(a[1]+(b[1]-a[1])*f) + ',' +
+        Math.round(a[2]+(b[2]-a[2])*f) + ')');
+    }
+  }
+  buildRamp(PLANETS[current].ramp);
+
+  var reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  function resize(){
+    var w = cvs.clientWidth, h = cvs.clientHeight;
+    if (w < 1 || h < 1) return false;   // 版面還沒量測到（分頁隱藏等），這次跳過
+
+    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    W = w; H = h;
+    cvs.width  = Math.round(W * DPR);
+    cvs.height = Math.round(H * DPR);
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+
+    R  = Math.max(W, H) * 1.42;
+    cx = W * 0.5;
+    cy = (H - H * ARC) + R;   // 球心遠在畫面下方，只露出上緣一道弧
+    return true;
+  }
+
+  function drawStars(){
+    var bandH = H * STAR_BAND;
+    ctx.fillStyle = '#ffffff';
+    for (var i = 0; i < STARS.length; i += 4){
+      ctx.globalAlpha = STARS[i+3];
+      ctx.beginPath();
+      ctx.arc(STARS[i] * W, STARS[i+1] * bandH, STARS[i+2], 0, 6.28318530718);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function drawLattice(spin, bands){
+    var cs = Math.cos(spin), ss = Math.sin(spin);
+    var minY = (cy - H) / R;
+    if (minY < -1) minY = -1;
+
+    for (var i = 0; i < LAT.length; i += 3){
+      var cla = LAT[i], sla = LAT[i+1];
+      var band = bands ? (1 + bands * Math.sin(LAT[i+2] * 9.0)) : 1;
+
+      for (var j = 0; j < LON.length; j += 2){
+        // 繞自轉軸旋轉
+        var x  = cla * LON[j];
+        var z  = cla * LON[j+1];
+        var xr =  x * cs + z * ss;
+        var zr = -x * ss + z * cs;
+
+        // 傾斜到視角座標
+        var Y = sla * CA - zr * SA;
+        var Z = sla * SA + zr * CA;
+        if (Z <= 0.015) continue;      // 背面剔除
+        var X = xr;
+
+        // 地平線微傾
+        var Xv = X * CR - Y * SR;
+        var Yv = X * SR + Y * CR;
+        if (Yv < minY) continue;       // 畫面外
+
+        var sy = cy - R * Yv;
+        if (sy > H + 2) continue;
+        var sx = cx + R * Xv;
+        if (sx < -2 || sx > W + 2) continue;
+
+        // 受光：Lambert
+        var lam = X * LX + Y * LY + Z * LZ;
+        if (lam < 0) lam = 0;
+
+        // 邊緣光：越靠近輪廓（Z 越小）越亮
+        var d = 1 - Z * Z;
+        var rim = d * d * d * d;
+
+        var v = (0.06 + 0.60 * Math.sqrt(lam) + 1.30 * rim * (0.20 + 0.80 * lam)) * band;
+        if (v > 1) v = 1; else if (v < 0) v = 0;
+
+        ctx.fillStyle = RAMP[(v * (LEVELS - 1)) | 0];
+        var s = 0.9 + v * 1.0;
+        ctx.fillRect(sx, sy, s, s);
+      }
+    }
+  }
+
+  function render(spin){
+    var P = PLANETS[current];
+
+    // 太空底色
+    var bg = ctx.createLinearGradient(0, 0, W * 0.35, H);
+    bg.addColorStop(0, '#02040b');
+    bg.addColorStop(0.6, '#03060f');
+    bg.addColorStop(1, '#050a16');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, W, H);
+
+    drawStars();
+
+    // 地平線外緣：大氣輝光
+    ctx.globalCompositeOperation = 'lighter';
+    var halo = ctx.createRadialGradient(cx, cy, R * 0.985, cx, cy, R * 1.11);
+    halo.addColorStop(0,    'rgba(' + P.halo + ',0.36)');
+    halo.addColorStop(0.26, 'rgba(' + P.halo + ',0.17)');
+    halo.addColorStop(0.60, 'rgba(' + P.halo + ',0.06)');
+    halo.addColorStop(1,    'rgba(' + P.halo + ',0)');
+    ctx.fillStyle = halo;
+    ctx.fillRect(0, 0, W, H);
+    ctx.globalCompositeOperation = 'source-over';
+
+    // 星球本體（遮住背後的星星）
+    ctx.beginPath();
+    ctx.arc(cx, cy, R, 0, 6.28318530718);
+    var body = ctx.createRadialGradient(cx, cy, R * 0.2, cx, cy, R);
+    body.addColorStop(0, P.body[0]);
+    body.addColorStop(1, P.body[1]);
+    ctx.fillStyle = body;
+    ctx.fill();
+
+    // 經緯粒子點陣
+    ctx.save();
+    ctx.clip();
+    drawLattice(spin, P.bands);
+    ctx.restore();
+
+    // 輪廓內側的邊緣光 + 左上受光處的散射亮斑
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(cx, cy, R, 0, 6.28318530718);
+    ctx.clip();
+    ctx.globalCompositeOperation = 'lighter';
+
+    var limb = ctx.createRadialGradient(cx, cy, R * 0.955, cx, cy, R);
+    limb.addColorStop(0, 'rgba(' + P.limb + ',0)');
+    limb.addColorStop(1, 'rgba(' + P.limb + ',0.32)');
+    ctx.fillStyle = limb;
+    ctx.fillRect(0, 0, W, H);
+
+    var lx = W * 0.22;
+    var dx = lx - cx;
+    var ly = cy - Math.sqrt(Math.max(0, R * R - dx * dx));
+    var sun = ctx.createRadialGradient(lx, ly, 0, lx, ly, W * 0.6);
+    sun.addColorStop(0,   'rgba(' + P.limb + ',0.20)');
+    sun.addColorStop(0.4, 'rgba(' + P.limb + ',0.07)');
+    sun.addColorStop(1,   'rgba(' + P.limb + ',0)');
+    ctx.fillStyle = sun;
+    ctx.fillRect(0, 0, W, H);
+    ctx.restore();
+  }
+
+  /* ───────── 計時器 ───────── */
+  var TOTAL = PLANETS[current].minutes * 60 * 1000;
+  var remaining = TOTAL;
+  var running = false;
+  var endAt = 0;
+
+  var elClock  = document.getElementById('clock');
+  var elStatus = document.getElementById('status');
+  var elFill   = document.getElementById('fill');
+  var elRocket = document.getElementById('rocket');
+  var elTrack  = document.getElementById('track');
+  var btnStart = document.getElementById('btnStart');
+  var btnPause = document.getElementById('btnPause');
+  var btnReset = document.getElementById('btnReset');
+
+  function fmt(ms){
+    var s = Math.ceil(ms / 1000);
+    var m = Math.floor(s / 60);
+    s = s % 60;
+    return (m < 10 ? '0' : '') + m + ':' + (s < 10 ? '0' : '') + s;
+  }
+
+  var lastText = '', lastPct = -1;
+
+  function paintUI(){
+    var text = fmt(remaining);
+    if (text !== lastText){
+      lastText = text;
+      elClock.textContent = text;
+      document.title = '任務計時器 · ' + PLANETS[current].label + ' ' + text;
+    }
+
+    var pct = Math.round((1 - remaining / TOTAL) * 1000) / 10;
+    if (pct !== lastPct){
+      lastPct = pct;
+      elFill.style.width = pct + '%';
+      elRocket.style.left = pct + '%';
+      elTrack.setAttribute('aria-valuenow', Math.round(pct));
+    }
+  }
+
+  function setStatus(t){ elStatus.textContent = t; }
+
+  function syncButtons(){
+    btnStart.disabled = running || remaining === 0;
+    btnPause.disabled = !running;
+    btnReset.disabled = !running && remaining === TOTAL;
+  }
+
+  function start(){
+    if (running || remaining <= 0) return;
+    endAt = performance.now() + remaining;
+    running = true;
+    document.body.classList.add('is-running');
+    document.body.classList.remove('is-done');
+    setStatus('飛行中');
+    syncButtons();
+  }
+
+  function pause(){
+    if (!running) return;
+    remaining = Math.max(0, endAt - performance.now());
+    running = false;
+    document.body.classList.remove('is-running');
+    setStatus('待機中');
+    syncButtons();
+  }
+
+  function reset(msg){
+    running = false;
+    remaining = TOTAL;
+    document.body.classList.remove('is-running', 'is-done');
+    setStatus(msg || '已返航');
+    lastText = ''; lastPct = -1;
+    paintUI();
+    syncButtons();
+  }
+
+  btnStart.addEventListener('click', start);
+  btnPause.addEventListener('click', pause);
+  btnReset.addEventListener('click', function(){ reset(); });
+
+  document.addEventListener('keydown', function(e){
+    if (e.code !== 'Space' || e.target !== document.body) return;
+    e.preventDefault();
+    running ? pause() : start();
+  });
+
+  function tickTimer(){
+    if (running){
+      remaining = endAt - performance.now();
+      if (remaining <= 0){
+        remaining = 0;
+        running = false;
+        document.body.classList.remove('is-running');
+        document.body.classList.add('is-done');
+        setStatus('已抵達 ' + PLANETS[current].label);
+        syncButtons();
+      }
+    }
+    paintUI();
+  }
+
+  /* ───────── 星球切換 ───────── */
+  var chips = Array.prototype.slice.call(document.querySelectorAll('.chip'));
+
+  function selectPlanet(key){
+    if (!PLANETS[key] || key === current) return;
+    current = key;
+    buildRamp(PLANETS[key].ramp);
+    chips.forEach(function(c){
+      c.setAttribute('aria-selected', c.dataset.planet === key ? 'true' : 'false');
+    });
+    TOTAL = PLANETS[key].minutes * 60 * 1000;
+    reset('目的地：' + PLANETS[key].label);   // 換目的地就回到發射台
+  }
+
+  chips.forEach(function(chip){
+    chip.addEventListener('click', function(){ selectPlanet(chip.dataset.planet); });
+  });
+
+  /* ───────── 主迴圈 ───────── */
+  var t0 = performance.now();
+
+  function frame(now){
+    if (W >= 1 || resize()){
+      var sp = PLANETS[current].spin;
+      render(reduceMotion ? 0.6 : 0.6 + (now - t0) * sp);
+    }
+    requestAnimationFrame(frame);
+  }
+
+  // 計時獨立於繪製：分頁隱藏時 rAF 會暫停，倒數不能跟著停
+  setInterval(tickTimer, 250);
+  document.addEventListener('visibilitychange', function(){
+    if (!document.hidden) tickTimer();
+  });
+
+  if (typeof ResizeObserver === 'function'){
+    new ResizeObserver(function(){ resize(); }).observe(cvs);
+  } else {
+    var resizeTimer = 0;
+    window.addEventListener('resize', function(){
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(resize, 80);
+    });
+  }
+
+  resize();
+  paintUI();
+  syncButtons();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
