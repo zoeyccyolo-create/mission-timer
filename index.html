@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>任務計時器 · 25:00</title>
+<title>任務計時器 · 30:00</title>
 <style>
   :root{
     --accent:#1e9df1;
@@ -204,15 +204,15 @@
 <canvas id="sky" aria-hidden="true"></canvas>
 
 <nav class="planets" id="planets" role="tablist" aria-label="目的地星球">
-  <button class="chip" type="button" role="tab" data-planet="earth"   aria-selected="true">地球</button>
-  <button class="chip" type="button" role="tab" data-planet="mars"    aria-selected="false">火星</button>
+  <button class="chip" type="button" role="tab" data-planet="mars"    aria-selected="true">火星</button>
+  <button class="chip" type="button" role="tab" data-planet="earth"   aria-selected="false">地球</button>
   <button class="chip" type="button" role="tab" data-planet="moon"    aria-selected="false">月球</button>
   <button class="chip" type="button" role="tab" data-planet="jupiter" aria-selected="false">木星</button>
   <button class="chip" type="button" role="tab" data-planet="saturn"  aria-selected="false">土星</button>
 </nav>
 
 <main>
-  <div id="clock" class="clock" role="timer" aria-live="off">25:00</div>
+  <div id="clock" class="clock" role="timer" aria-live="off">30:00</div>
   <p id="status" class="sr-only" aria-live="polite">待機中</p>
   <p id="sun" class="sun"></p>
 
@@ -287,17 +287,17 @@
 
   /* ───────── 星球設定：外觀 + 各自的任務時長 ───────── */
   var PLANETS = {
-    earth:{
-      label:'地球', minutes:25,
-      ramp:[[6,14,34],[26,70,122],[94,178,218],[228,246,255]],
-      halo:'110,186,255', limb:'150,214,255',
-      body:['#01030a','#050c1c'], bands:0, spin:0.0000075
-    },
     mars:{
       label:'火星', minutes:30,
       ramp:[[28,10,6],[96,40,20],[198,106,54],[255,216,180]],
       halo:'255,146,88', limb:'255,190,144',
       body:['#0a0402','#180a05'], bands:0.05, spin:0.0000068
+    },
+    earth:{
+      label:'地球', minutes:25,
+      ramp:[[6,14,34],[26,70,122],[94,178,218],[228,246,255]],
+      halo:'110,186,255', limb:'150,214,255',
+      body:['#01030a','#050c1c'], bands:0, spin:0.0000075
     },
     moon:{
       label:'月球', minutes:15,
@@ -318,7 +318,7 @@
       body:['#0a0803','#1b1509'], bands:0.16, spin:0.0000115
     }
   };
-  var current = 'earth';
+  var current = 'mars';
 
   /* ───────── 星球幾何 ───────── */
   var cvs = document.getElementById('sky');
