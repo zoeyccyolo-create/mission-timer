@@ -396,6 +396,50 @@
 
   var reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
+  /* 火星實拍圖。載入失敗（檔案遺失、格式不支援）就維持 marsImg = null，
+     繪製時自動退回原本的程式點陣火星，畫面不會開天窗 */
+  var marsImg = null;
+  (function(){
+    var im = new Image();
+    im.onload = function(){
+      if (!im.naturalWidth) return;
+      marsImg = softenTop(im) || im;   // 處理失敗就用原圖，只是接縫較硬
+    };
+    im.onerror = function(){ marsImg = null; };
+    im.src = 'mars.jpg';
+  })();
+
+  /* 照片上緣是一條直線，直接貼會在星空與照片之間留下明顯接縫。
+     這裡把上緣做成「亮度感知」的淡出：暗的天空漸漸透明去接星空，
+     亮的邊緣光保持不透明，弧線才不會被削掉。 */
+  function softenTop(im){
+    try {
+      var iw = im.naturalWidth, ih = im.naturalHeight;
+      var off = document.createElement('canvas');
+      off.width = iw; off.height = ih;
+      var oc = off.getContext('2d');
+      oc.drawImage(im, 0, 0);
+
+      var bandH = Math.round(ih * 0.22);
+      var img = oc.getImageData(0, 0, iw, bandH);   // 跨來源會丟例外
+      var d = img.data;
+      for (var y = 0; y < bandH; y++){
+        var t = y / bandH;                           // 0＝最上緣，1＝band 底部
+        for (var x = 0; x < iw; x++){
+          var p = (y * iw + x) * 4;
+          var luma = (d[p] * 0.30 + d[p+1] * 0.59 + d[p+2] * 0.11) / 92;
+          if (luma > 1) luma = 1;
+          var a = t > luma ? t : luma;               // 亮的留著，暗的淡出
+          d[p+3] = (a * 255) | 0;
+        }
+      }
+      oc.putImageData(img, 0, 0);
+      return off;
+    } catch (e){
+      return null;
+    }
+  }
+
   function resize(){
     var w = cvs.clientWidth, h = cvs.clientHeight;
     if (w < 1 || h < 1) return false;   // 版面還沒量測到（分頁隱藏等），這次跳過
@@ -535,7 +579,81 @@
     ctx.fillStyle = halo;
     ctx.fillRect(0, 0, W, H);
 
+    ctx.globalCompositeOperation = 'source-over';
+
+    var photo = (current === 'mars' && marsImg) ? marsImg : null;
+
+    if (photo){
+      // 實拍火星：圖片頂端對齊地平線，上方保留星空，UI 不會壓在亮面上
+      if (alive > 0.01){
+        var hy = H * (1 - ARC);
+        var iw = photo.naturalWidth || photo.width;    // Image 或離屏 canvas 都相容
+        var ih = photo.naturalHeight || photo.height;
+        var psc = Math.max(W / iw, (H - hy + 4) / ih);
+        var pw = iw * psc, ph = ih * psc;
+        ctx.globalAlpha = alive;
+        ctx.drawImage(photo, (W - pw) / 2, hy, pw, ph);
+        ctx.globalAlpha = 1;
+      }
+      // 崩解時讓點陣碎片淡入，做出「實體炸成碎片」的交接
+      if (bt > 0){
+        ctx.globalAlpha = Math.min(1, b * 2.2);
+        drawLattice(spin, P.bands, bt);
+        ctx.globalAlpha = 1;
+      }
+    } else {
+      // 星球本體（遮住背後的星星）；崩解時逐漸透出星空
+      ctx.beginPath();
+      ctx.arc(cx, cy, R, 0, 6.28318530718);
+      var body = ctx.createRadialGradient(cx, cy, R * 0.2, cx, cy, R);
+      body.addColorStop(0, P.body[0]);
+      body.addColorStop(1, P.body[1]);
+      ctx.globalAlpha = 1 - b * 0.88;
+      ctx.fillStyle = body;
+      ctx.fill();
+      ctx.globalAlpha = 1;
+
+      // 經緯粒子點陣。完好時裁切在球內；爆炸後不裁切，碎片才能飛出輪廓
+      if (bt > 0){
+        drawLattice(spin, P.bands, bt);
+      } else {
+        ctx.save();
+        ctx.clip();
+        drawLattice(spin, P.bands, 0);
+        ctx.restore();
+      }
+
+      // 輪廓內側的邊緣光 + 左上受光處的散射亮斑
+      if (alive > 0.02){
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(cx, cy, R, 0, 6.28318530718);
+        ctx.clip();
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.globalAlpha = alive;
+
+        var limb = ctx.createRadialGradient(cx, cy, R * 0.955, cx, cy, R);
+        limb.addColorStop(0, 'rgba(' + P.limb + ',0)');
+        limb.addColorStop(1, 'rgba(' + P.limb + ',0.32)');
+        ctx.fillStyle = limb;
+        ctx.fillRect(0, 0, W, H);
+
+        var lx = W * 0.22;
+        var dx = lx - cx;
+        var ly = cy - Math.sqrt(Math.max(0, R * R - dx * dx));
+        var sun = ctx.createRadialGradient(lx, ly, 0, lx, ly, W * 0.6);
+        sun.addColorStop(0,   'rgba(' + P.limb + ',0.20)');
+        sun.addColorStop(0.4, 'rgba(' + P.limb + ',0.07)');
+        sun.addColorStop(1,   'rgba(' + P.limb + ',0)');
+        ctx.fillStyle = sun;
+        ctx.fillRect(0, 0, W, H);
+        ctx.restore();
+      }
+    }
+
+    // 火光與衝擊波畫在星球之上，崩解時才會蓋過表面
     if (b > 0){
+      ctx.globalCompositeOperation = 'lighter';
       // 歸零後火光要退掉，否則畫面會一直留著一層橘霧
       var emb = b / (1 + (bt > 1 ? bt - 1 : 0) * 1.15);
       var fire = ctx.createRadialGradient(cx, cy, R * 0.90, cx, cy, R * 1.35);
@@ -556,55 +674,7 @@
           ctx.stroke();
         }
       }
-    }
-    ctx.globalCompositeOperation = 'source-over';
-
-    // 星球本體（遮住背後的星星）；崩解時逐漸透出星空
-    ctx.beginPath();
-    ctx.arc(cx, cy, R, 0, 6.28318530718);
-    var body = ctx.createRadialGradient(cx, cy, R * 0.2, cx, cy, R);
-    body.addColorStop(0, P.body[0]);
-    body.addColorStop(1, P.body[1]);
-    ctx.globalAlpha = 1 - b * 0.88;
-    ctx.fillStyle = body;
-    ctx.fill();
-    ctx.globalAlpha = 1;
-
-    // 經緯粒子點陣。完好時裁切在球內；爆炸後不裁切，碎片才能飛出輪廓
-    if (bt > 0){
-      drawLattice(spin, P.bands, bt);
-    } else {
-      ctx.save();
-      ctx.clip();
-      drawLattice(spin, P.bands, 0);
-      ctx.restore();
-    }
-
-    // 輪廓內側的邊緣光 + 左上受光處的散射亮斑
-    if (alive > 0.02){
-      ctx.save();
-      ctx.beginPath();
-      ctx.arc(cx, cy, R, 0, 6.28318530718);
-      ctx.clip();
-      ctx.globalCompositeOperation = 'lighter';
-      ctx.globalAlpha = alive;
-
-      var limb = ctx.createRadialGradient(cx, cy, R * 0.955, cx, cy, R);
-      limb.addColorStop(0, 'rgba(' + P.limb + ',0)');
-      limb.addColorStop(1, 'rgba(' + P.limb + ',0.32)');
-      ctx.fillStyle = limb;
-      ctx.fillRect(0, 0, W, H);
-
-      var lx = W * 0.22;
-      var dx = lx - cx;
-      var ly = cy - Math.sqrt(Math.max(0, R * R - dx * dx));
-      var sun = ctx.createRadialGradient(lx, ly, 0, lx, ly, W * 0.6);
-      sun.addColorStop(0,   'rgba(' + P.limb + ',0.20)');
-      sun.addColorStop(0.4, 'rgba(' + P.limb + ',0.07)');
-      sun.addColorStop(1,   'rgba(' + P.limb + ',0)');
-      ctx.fillStyle = sun;
-      ctx.fillRect(0, 0, W, H);
-      ctx.restore();
+      ctx.globalCompositeOperation = 'source-over';
     }
 
     ctx.restore();   // 解除震動位移
