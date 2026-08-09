@@ -349,22 +349,50 @@
     }
   })();
 
+  var N_LAT = LAT.length / 3, N_LON = LON.length / 2;
+
+  /* 爆炸用的逐點固定資料：噴飛速度、散射方向、裂縫圖樣。
+     用固定種子的 LCG 產生，每次載入結果一致，且整段動畫期間不會抖動。 */
+  var RND1 = new Float32Array(N_LAT * N_LON);
+  var RND2 = new Float32Array(N_LAT * N_LON);
+  var CRACK = new Float32Array(N_LAT * N_LON);
+  (function seed(){
+    var s = 20260809 >>> 0;
+    var rnd = function(){ s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
+    for (var li = 0; li < N_LAT; li++){
+      var lat = LAT[li*3 + 2];
+      for (var lj = 0; lj < N_LON; lj++){
+        var k = li * N_LON + lj;
+        RND1[k] = rnd();
+        RND2[k] = rnd();
+        // 兩組不同頻率交疊出不規則的裂縫網，數值越小＝越靠近裂縫
+        CRACK[k] = Math.abs(Math.sin(lat*5.1 + LON[lj*2]*2.7) *
+                            Math.cos(lat*2.3 + LON[lj*2+1]*3.4));
+      }
+    }
+  })();
+
   // 亮度分層：預先產生色階字串，避免每格重組字串
   var LEVELS = 30;
   var RAMP = [];
-  function buildRamp(stops){
-    RAMP.length = 0;
+  function rampFrom(stops, out){
+    out.length = 0;
     for (var i = 0; i < LEVELS; i++){
       var t = i/(LEVELS-1) * (stops.length-1);
       var k = Math.min(stops.length-2, Math.floor(t));
       var f = t - k, a = stops[k], b = stops[k+1];
-      RAMP.push('rgb(' +
+      out.push('rgb(' +
         Math.round(a[0]+(b[0]-a[0])*f) + ',' +
         Math.round(a[1]+(b[1]-a[1])*f) + ',' +
         Math.round(a[2]+(b[2]-a[2])*f) + ')');
     }
+    return out;
   }
+  function buildRamp(stops){ rampFrom(stops, RAMP); }
   buildRamp(PLANETS[current].ramp);
+
+  // 爆炸時的熾熱色階：暗紅 → 橙 → 黃 → 白
+  var HOT = rampFrom([[60,8,4],[168,44,10],[248,140,26],[255,232,168]], []);
 
   var reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
@@ -396,14 +424,23 @@
     ctx.globalAlpha = 1;
   }
 
-  function drawLattice(spin, bands){
+  function drawLattice(spin, bands, bt){
     var cs = Math.cos(spin), ss = Math.sin(spin);
     var minY = (cy - H) / R;
     if (minY < -1) minY = -1;
 
+    // bt：0＝完好，1＝倒數歸零的瞬間，>1＝歸零後的餘燼擴散
+    var b     = bt > 1 ? 1 : bt;
+    var drift = bt > 1 ? (bt - 1) : 0;
+    var spread = drift > 1.5 ? 1.5 : drift;             // 收斂擴散，讓殘骸留在畫面裡
+    var blow  = (b * b) * 0.34 * H + spread * 0.13 * H; // 噴飛距離（螢幕高度為單位）
+    var crackW = 0.05 + b * 0.62;                        // 裂縫隨時間變寬
+    var cool  = 1 / (1 + drift * 0.5);                   // 餘燼逐漸變暗
+
     for (var i = 0; i < LAT.length; i += 3){
       var cla = LAT[i], sla = LAT[i+1];
       var band = bands ? (1 + bands * Math.sin(LAT[i+2] * 9.0)) : 1;
+      var rowBase = (i / 3) * N_LON;
 
       for (var j = 0; j < LON.length; j += 2){
         // 繞自轉軸旋轉
@@ -424,9 +461,7 @@
         if (Yv < minY) continue;       // 畫面外
 
         var sy = cy - R * Yv;
-        if (sy > H + 2) continue;
         var sx = cx + R * Xv;
-        if (sx < -2 || sx > W + 2) continue;
 
         // 受光：Lambert
         var lam = X * LX + Y * LY + Z * LZ;
@@ -437,77 +472,155 @@
         var rim = d * d * d * d;
 
         var v = (0.06 + 0.60 * Math.sqrt(lam) + 1.30 * rim * (0.20 + 0.80 * lam)) * band;
+        var hot = false;
+
+        if (bt > 0){
+          var k  = rowBase + (j >> 1);
+          var r1 = RND1[k], r2 = RND2[k];
+
+          // 沿著「由球心向外」的方向噴飛，再加上亂向散射
+          var push = blow * (0.30 + r1 * 1.15);
+          var dx = sx - cx, dy = sy - cy;
+          var len = Math.sqrt(dx*dx + dy*dy) || 1;
+          sx += dx / len * push + (r1 - 0.5) * push * 0.65;
+          sy += dy / len * push + (r2 - 0.5) * push * 0.65;
+
+          // 裂縫先燒起來，之後範圍逐漸擴大到整顆
+          hot = CRACK[k] < crackW || b > 0.55 + r2 * 0.45;
+          if (hot) v = (v + 0.30 + b * 0.85) * cool;
+          else     v = v * (1 - b * 0.55);
+        }
+
+        if (sy > H + 2 || sy < -2 || sx < -2 || sx > W + 2) continue;
+
         if (v > 1) v = 1; else if (v < 0) v = 0;
 
-        ctx.fillStyle = RAMP[(v * (LEVELS - 1)) | 0];
+        ctx.fillStyle = (hot ? HOT : RAMP)[(v * (LEVELS - 1)) | 0];
         var s = 0.9 + v * 1.0;
         ctx.fillRect(sx, sy, s, s);
       }
     }
   }
 
-  function render(spin){
+  function render(spin, bt){
     var P = PLANETS[current];
+    var b = bt > 1 ? 1 : bt;          // 0..1
+    var alive = 1 - b;                 // 星球「完整度」
 
-    // 太空底色
+    ctx.save();
+
+    // 爆炸時整個畫面震動（連星星一起，相對位置不變，不是星星自己在抖）
+    if (b > 0 && !reduceMotion){
+      var amp = b * b * 11;
+      ctx.translate((Math.random() - 0.5) * amp, (Math.random() - 0.5) * amp);
+    }
+
+    // 太空底色（多畫一圈，避免震動時邊緣露出空白）
     var bg = ctx.createLinearGradient(0, 0, W * 0.35, H);
     bg.addColorStop(0, '#02040b');
     bg.addColorStop(0.6, '#03060f');
     bg.addColorStop(1, '#050a16');
     ctx.fillStyle = bg;
-    ctx.fillRect(0, 0, W, H);
+    ctx.fillRect(-24, -24, W + 48, H + 48);
 
     drawStars();
 
-    // 地平線外緣：大氣輝光
+    // 地平線外緣：大氣輝光（爆炸時逐漸轉成火光）
     ctx.globalCompositeOperation = 'lighter';
     var halo = ctx.createRadialGradient(cx, cy, R * 0.985, cx, cy, R * 1.11);
-    halo.addColorStop(0,    'rgba(' + P.halo + ',0.36)');
-    halo.addColorStop(0.26, 'rgba(' + P.halo + ',0.17)');
-    halo.addColorStop(0.60, 'rgba(' + P.halo + ',0.06)');
+    halo.addColorStop(0,    'rgba(' + P.halo + ',' + (0.36 * alive).toFixed(3) + ')');
+    halo.addColorStop(0.26, 'rgba(' + P.halo + ',' + (0.17 * alive).toFixed(3) + ')');
+    halo.addColorStop(0.60, 'rgba(' + P.halo + ',' + (0.06 * alive).toFixed(3) + ')');
     halo.addColorStop(1,    'rgba(' + P.halo + ',0)');
     ctx.fillStyle = halo;
     ctx.fillRect(0, 0, W, H);
+
+    if (b > 0){
+      // 歸零後火光要退掉，否則畫面會一直留著一層橘霧
+      var emb = b / (1 + (bt > 1 ? bt - 1 : 0) * 1.15);
+      var fire = ctx.createRadialGradient(cx, cy, R * 0.90, cx, cy, R * 1.35);
+      fire.addColorStop(0,    'rgba(255,116,26,' + (0.42 * emb).toFixed(3) + ')');
+      fire.addColorStop(0.35, 'rgba(255,72,18,'  + (0.22 * emb).toFixed(3) + ')');
+      fire.addColorStop(1,    'rgba(180,30,10,0)');
+      ctx.fillStyle = fire;
+      ctx.fillRect(0, 0, W, H);
+
+      // 衝擊波：從地平線往外擴散
+      if (bt > 0.72){
+        var sw = (bt - 0.72) / 0.55;
+        if (sw < 1.6){
+          ctx.strokeStyle = 'rgba(255,214,150,' + (Math.max(0, 1 - sw / 1.6) * 0.55).toFixed(3) + ')';
+          ctx.lineWidth = 2 + Math.max(0, 1 - sw) * 12;
+          ctx.beginPath();
+          ctx.arc(cx, cy, R + sw * H * 1.25, 0, 6.28318530718);
+          ctx.stroke();
+        }
+      }
+    }
     ctx.globalCompositeOperation = 'source-over';
 
-    // 星球本體（遮住背後的星星）
+    // 星球本體（遮住背後的星星）；崩解時逐漸透出星空
     ctx.beginPath();
     ctx.arc(cx, cy, R, 0, 6.28318530718);
     var body = ctx.createRadialGradient(cx, cy, R * 0.2, cx, cy, R);
     body.addColorStop(0, P.body[0]);
     body.addColorStop(1, P.body[1]);
+    ctx.globalAlpha = 1 - b * 0.88;
     ctx.fillStyle = body;
     ctx.fill();
+    ctx.globalAlpha = 1;
 
-    // 經緯粒子點陣
-    ctx.save();
-    ctx.clip();
-    drawLattice(spin, P.bands);
-    ctx.restore();
+    // 經緯粒子點陣。完好時裁切在球內；爆炸後不裁切，碎片才能飛出輪廓
+    if (bt > 0){
+      drawLattice(spin, P.bands, bt);
+    } else {
+      ctx.save();
+      ctx.clip();
+      drawLattice(spin, P.bands, 0);
+      ctx.restore();
+    }
 
     // 輪廓內側的邊緣光 + 左上受光處的散射亮斑
-    ctx.save();
-    ctx.beginPath();
-    ctx.arc(cx, cy, R, 0, 6.28318530718);
-    ctx.clip();
-    ctx.globalCompositeOperation = 'lighter';
+    if (alive > 0.02){
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(cx, cy, R, 0, 6.28318530718);
+      ctx.clip();
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.globalAlpha = alive;
 
-    var limb = ctx.createRadialGradient(cx, cy, R * 0.955, cx, cy, R);
-    limb.addColorStop(0, 'rgba(' + P.limb + ',0)');
-    limb.addColorStop(1, 'rgba(' + P.limb + ',0.32)');
-    ctx.fillStyle = limb;
-    ctx.fillRect(0, 0, W, H);
+      var limb = ctx.createRadialGradient(cx, cy, R * 0.955, cx, cy, R);
+      limb.addColorStop(0, 'rgba(' + P.limb + ',0)');
+      limb.addColorStop(1, 'rgba(' + P.limb + ',0.32)');
+      ctx.fillStyle = limb;
+      ctx.fillRect(0, 0, W, H);
 
-    var lx = W * 0.22;
-    var dx = lx - cx;
-    var ly = cy - Math.sqrt(Math.max(0, R * R - dx * dx));
-    var sun = ctx.createRadialGradient(lx, ly, 0, lx, ly, W * 0.6);
-    sun.addColorStop(0,   'rgba(' + P.limb + ',0.20)');
-    sun.addColorStop(0.4, 'rgba(' + P.limb + ',0.07)');
-    sun.addColorStop(1,   'rgba(' + P.limb + ',0)');
-    ctx.fillStyle = sun;
-    ctx.fillRect(0, 0, W, H);
-    ctx.restore();
+      var lx = W * 0.22;
+      var dx = lx - cx;
+      var ly = cy - Math.sqrt(Math.max(0, R * R - dx * dx));
+      var sun = ctx.createRadialGradient(lx, ly, 0, lx, ly, W * 0.6);
+      sun.addColorStop(0,   'rgba(' + P.limb + ',0.20)');
+      sun.addColorStop(0.4, 'rgba(' + P.limb + ',0.07)');
+      sun.addColorStop(1,   'rgba(' + P.limb + ',0)');
+      ctx.fillStyle = sun;
+      ctx.fillRect(0, 0, W, H);
+      ctx.restore();
+    }
+
+    ctx.restore();   // 解除震動位移
+
+    // 歸零瞬間的爆閃（畫在 canvas 上，所以在文字下層，不會蓋掉倒數）
+    var flash = 0;
+    if (bt >= 0.94 && bt <= 1)      flash = (bt - 0.94) / 0.06 * 0.8;
+    else if (bt > 1)                flash = Math.max(0, 0.8 * (1 - (bt - 1) / 1.1));
+    if (flash > 0){
+      var fg = ctx.createRadialGradient(cx, cy - R * 0.02, 0, cx, cy, R * 1.2);
+      fg.addColorStop(0, 'rgba(255,246,226,' + flash.toFixed(3) + ')');
+      fg.addColorStop(0.5, 'rgba(255,176,80,' + (flash * 0.7).toFixed(3) + ')');
+      fg.addColorStop(1, 'rgba(255,110,30,0)');
+      ctx.fillStyle = fg;
+      ctx.fillRect(0, 0, W, H);
+    }
   }
 
   /* ───────── 計時器 ───────── */
@@ -515,6 +628,16 @@
   var remaining = TOTAL;
   var running = false;
   var endAt = 0;
+
+  var BOOM_MS = 12 * 1000;       // 最後 12 秒開始崩解
+  var doneAt = 0;                // 倒數歸零的時間戳，用來延續爆炸後的畫面
+
+  // 0＝完好；0→1＝最後三分鐘的崩解過程；>1＝歸零後每秒 +1 的餘波
+  function boomPhase(){
+    if (doneAt) return Math.min(6, 1 + (performance.now() - doneAt) / 1000);
+    if (remaining >= BOOM_MS) return 0;
+    return 1 - remaining / BOOM_MS;
+  }
 
   var elClock  = document.getElementById('clock');
   var elStatus = document.getElementById('status');
@@ -563,6 +686,7 @@
     if (running || remaining <= 0) return;
     endAt = performance.now() + remaining;
     running = true;
+    doneAt = 0;
     document.body.classList.add('is-running');
     document.body.classList.remove('is-done');
     setStatus('飛行中');
@@ -581,6 +705,7 @@
   function reset(msg){
     running = false;
     remaining = TOTAL;
+    doneAt = 0;
     document.body.classList.remove('is-running', 'is-done');
     setStatus(msg || '已返航');
     lastText = ''; lastPct = -1;
@@ -604,6 +729,7 @@
       if (remaining <= 0){
         remaining = 0;
         running = false;
+        if (!doneAt) doneAt = performance.now();
         document.body.classList.remove('is-running');
         document.body.classList.add('is-done');
         setStatus('已抵達 ' + PLANETS[current].label);
@@ -678,7 +804,7 @@
   function frame(now){
     if (W >= 1 || resize()){
       var sp = PLANETS[current].spin;
-      render(reduceMotion ? 0.6 : 0.6 + (now - t0) * sp);
+      render(reduceMotion ? 0.6 : 0.6 + (now - t0) * sp, boomPhase());
     }
     requestAnimationFrame(frame);
   }
