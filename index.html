@@ -110,24 +110,43 @@
     width:min(600px, 84vw);
     margin-top:clamp(30px,6vh,60px);
   }
+  /* 拖曳用的加大命中區：軌道只有 3px，直接抓很難點中 */
+  .scrub{
+    padding:15px 0;
+    cursor:grab;
+    touch-action:none;          /* 手機上拖曳不要變成捲動頁面 */
+    -webkit-tap-highlight-color:transparent;
+  }
+  .scrub:active{ cursor:grabbing; }
+  body.is-scrubbing .scrub{ cursor:grabbing; }
+
   .track{
     position:relative;
     height:3px;
     background:rgba(180,205,235,.16);
     border-radius:3px;
+    transition:background .15s ease;
   }
+  .track:focus-visible{ outline:2px solid var(--accent-hi); outline-offset:10px; border-radius:4px; }
+  .scrub:hover .track,
+  body.is-scrubbing .track{ background:rgba(180,205,235,.30); }
+  .scrub:hover .rocket,
+  body.is-scrubbing .rocket{ transform:translate(-50%,-50%) scale(1.18); }
   .fill{
     position:absolute; left:0; top:0; bottom:0;
     width:0%;
     background:var(--accent);
     border-radius:3px;
     box-shadow:0 0 14px rgba(30,157,241,.55);
+    pointer-events:none;
   }
   .rocket{
     position:absolute;
     top:50%; left:0;
     width:30px; height:30px;
     transform:translate(-50%,-50%);
+    pointer-events:none;
+    transition:transform .15s ease;
   }
   .rocket svg{ display:block; width:100%; height:100%; overflow:visible; }
   .flame{ opacity:0; transform-origin:7px 12px; }
@@ -217,7 +236,9 @@
   <p id="sun" class="sun"></p>
 
   <div class="progress">
-    <div class="track" id="track" role="progressbar" aria-label="任務進度"
+    <div class="scrub" id="scrub">
+    <div class="track" id="track" role="slider" tabindex="0"
+         aria-label="任務進度，可拖曳調整"
          aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
       <div class="fill" id="fill"></div>
       <div class="rocket" id="rocket">
@@ -230,6 +251,7 @@
           <circle cx="16.6" cy="12" r="1.9" fill="#0b1220"/>
         </svg>
       </div>
+    </div>
     </div>
     <div class="ends"><span>啟程</span><span>抵達</span></div>
   </div>
@@ -741,6 +763,7 @@
       elFill.style.width = pct + '%';
       elRocket.style.left = pct + '%';
       elTrack.setAttribute('aria-valuenow', Math.round(pct));
+      elTrack.setAttribute('aria-valuetext', '剩餘 ' + text);
     }
   }
 
@@ -793,7 +816,73 @@
     running ? pause() : start();
   });
 
+  /* ───────── 進度條拖曳：直接把任務時間拉到任一位置 ───────── */
+  var elScrub = document.getElementById('scrub');
+  var dragging = false;
+
+  // p：0＝啟程，1＝抵達
+  function applySeek(p){
+    if (p < 0) p = 0; else if (p > 1) p = 1;
+    remaining = Math.round(TOTAL * (1 - p));
+
+    if (remaining <= 0){
+      remaining = 0;
+      running = false;
+      if (!doneAt) doneAt = performance.now();
+      document.body.classList.remove('is-running');
+      document.body.classList.add('is-done');
+      setStatus('已抵達 ' + PLANETS[current].label);
+    } else {
+      doneAt = 0;                                   // 從終點拖回來要能復原
+      document.body.classList.remove('is-done');
+      if (running) endAt = performance.now() + remaining;
+    }
+
+    lastText = ''; lastPct = -1;
+    paintUI();
+    syncButtons();
+  }
+
+  function seekFromPointer(e){
+    var r = elTrack.getBoundingClientRect();
+    if (!r.width) return;
+    applySeek((e.clientX - r.left) / r.width);
+  }
+
+  function endDrag(){
+    if (!dragging) return;
+    dragging = false;
+    document.body.classList.remove('is-scrubbing');
+  }
+
+  elScrub.addEventListener('pointerdown', function(e){
+    if (e.button !== undefined && e.button !== 0) return;
+    dragging = true;
+    document.body.classList.add('is-scrubbing');
+    if (elScrub.setPointerCapture) elScrub.setPointerCapture(e.pointerId);
+    e.preventDefault();
+    seekFromPointer(e);
+  });
+  elScrub.addEventListener('pointermove', function(e){ if (dragging) seekFromPointer(e); });
+  elScrub.addEventListener('pointerup', endDrag);
+  elScrub.addEventListener('pointercancel', endDrag);
+
+  elTrack.addEventListener('keydown', function(e){
+    var step = e.shiftKey ? 60000 : 15000;
+    var d;
+    if (e.key === 'ArrowRight' || e.key === 'ArrowUp')        d = -step;   // 往抵達＝剩餘變少
+    else if (e.key === 'ArrowLeft' || e.key === 'ArrowDown')  d =  step;
+    else if (e.key === 'Home'){ e.preventDefault(); applySeek(0); return; }
+    else if (e.key === 'End'){  e.preventDefault(); applySeek(1); return; }
+    else return;
+    e.preventDefault();
+    var nr = remaining + d;
+    if (nr < 0) nr = 0; else if (nr > TOTAL) nr = TOTAL;
+    applySeek(1 - nr / TOTAL);
+  });
+
   function tickTimer(){
+    if (dragging) return;      // 拖曳期間不要讓倒數跟你搶位置
     if (running){
       remaining = endAt - performance.now();
       if (remaining <= 0){
