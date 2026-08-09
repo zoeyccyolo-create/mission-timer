@@ -96,6 +96,16 @@
   }
   body.is-done .clock{ color:var(--accent-hi); text-shadow:0 0 60px rgba(56,173,255,.4); }
 
+  .sun{
+    margin:clamp(14px,2.8vh,28px) 0 0;
+    font-size:13px;
+    letter-spacing:.18em;
+    padding-left:.18em;
+    color:var(--muted);
+    text-align:center;
+    min-height:1em;          /* 先佔位，資料回來時不會把版面推動 */
+  }
+
   .progress{
     width:min(600px, 84vw);
     margin-top:clamp(30px,6vh,60px);
@@ -204,6 +214,7 @@
 <main>
   <div id="clock" class="clock" role="timer" aria-live="off">25:00</div>
   <p id="status" class="sr-only" aria-live="polite">待機中</p>
+  <p id="sun" class="sun"></p>
 
   <div class="progress">
     <div class="track" id="track" role="progressbar" aria-label="任務進度"
@@ -619,6 +630,47 @@
   chips.forEach(function(chip){
     chip.addEventListener('click', function(){ selectPlanet(chip.dataset.planet); });
   });
+
+  /* ───────── 台北日出日落（Open-Meteo，免金鑰） ─────────
+     整段獨立於計時器：拿不到資料只會讓這一行顯示「離線」，不影響其他功能 */
+  (function loadSun(){
+    var el = document.getElementById('sun');
+    if (!el) return;
+
+    var offline = function(){ el.textContent = '離線'; };
+
+    if (typeof fetch !== 'function'){ offline(); return; }
+
+    var url = 'https://api.open-meteo.com/v1/forecast'
+            + '?latitude=25.03&longitude=121.56'
+            + '&daily=sunrise,sunset&timezone=Asia/Taipei&forecast_days=1';
+
+    // 沒有逾時機制的話，網路卡住會讓這行永遠空白
+    var ctrl = (typeof AbortController === 'function') ? new AbortController() : null;
+    var timer = ctrl ? setTimeout(function(){ ctrl.abort(); }, 8000) : 0;
+    var done = function(){ if (timer) { clearTimeout(timer); timer = 0; } };
+
+    // API 已用 timezone 參數回當地時間，取 T 後面的 HH:MM 即可
+    var hhmm = function(v){
+      var m = /T(\d{2}:\d{2})/.exec(String(v));
+      return m ? m[1] : null;
+    };
+
+    fetch(url, ctrl ? { signal: ctrl.signal } : undefined)
+      .then(function(res){
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        return res.json();
+      })
+      .then(function(data){
+        var d = data && data.daily;
+        var rise = hhmm(d && d.sunrise && d.sunrise[0]);
+        var set  = hhmm(d && d.sunset  && d.sunset[0]);
+        if (!rise || !set) throw new Error('回傳欄位缺漏');
+        el.textContent = '日出 ' + rise + ' ／ 日落 ' + set;
+        done();
+      })
+      .catch(function(){ offline(); done(); });
+  })();
 
   /* ───────── 主迴圈 ───────── */
   var t0 = performance.now();
